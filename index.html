@@ -184,6 +184,20 @@
       color: #4CAF50;
       margin-bottom: 20px;
     }
+
+    .error {
+      background: #fee;
+      border: 1px solid #fcc;
+      border-radius: 10px;
+      padding: 15px;
+      margin-bottom: 20px;
+      color: #c33;
+      display: none;
+    }
+
+    .error.show {
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -192,6 +206,8 @@
       <h1>🚗 ثبت حضور تپسی</h1>
       <p>لطفاً موقعیت و عکس خود را ثبت کنید</p>
     </div>
+
+    <div class="error" id="error"></div>
 
     <div class="status" id="status">
       <div class="status-icon">📍</div>
@@ -234,19 +250,30 @@
     </div>
   </div>
 
-  <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <script>
     let latitude = null;
     let longitude = null;
     let photoData = null;
     let stream = null;
 
-    // دریافت اطلاعات کاربر از Telegram Web App
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-    
-    const userId = tg.initDataUnsafe?.user?.id || 'test_user';
-    const userName = tg.initDataUnsafe?.user?.first_name || 'کاربر';
+    // ⭐ گرفتن userId از URL
+    function getUrlParameter(name) {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get(name);
+    }
+
+    const userId = getUrlParameter('user_id') || 'test_user';
+    const userName = decodeURIComponent(getUrlParameter('user_name') || 'کاربر');
+
+    console.log('👤 User ID:', userId);
+    console.log('📝 User Name:', userName);
+
+    // نمایش خطا
+    function showError(message) {
+      const errorDiv = document.getElementById('error');
+      errorDiv.textContent = message;
+      errorDiv.classList.add('show');
+    }
 
     // گرفتن GPS
     function getLocation() {
@@ -255,6 +282,8 @@
           (position) => {
             latitude = position.coords.latitude;
             longitude = position.coords.longitude;
+            
+            console.log('📍 Location:', latitude, longitude);
             
             document.getElementById('status').innerHTML = `
               <div class="status-icon">✅</div>
@@ -270,11 +299,13 @@
             startCamera();
           },
           (error) => {
+            console.error('❌ Location error:', error);
             document.getElementById('status').innerHTML = `
               <div class="status-icon">❌</div>
               <div class="status-text">خطا در دریافت موقعیت</div>
               <div class="status-detail">${error.message}</div>
             `;
+            showError('لطفاً دسترسی به موقعیت مکانی را مجاز کنید');
           },
           {
             enableHighAccuracy: true,
@@ -283,7 +314,7 @@
           }
         );
       } else {
-        alert("مرورگر شما از GPS پشتیبانی نمی‌کند");
+        showError("مرورگر شما از GPS پشتیبانی نمی‌کند");
       }
     }
 
@@ -291,7 +322,7 @@
     async function startCamera() {
       try {
         stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: "user" }, // سلفی
+          video: { facingMode: "user" },
           audio: false 
         });
         
@@ -302,7 +333,8 @@
         
         document.getElementById('takePictureBtn').disabled = false;
       } catch (error) {
-        alert("خطا در باز کردن دوربین: " + error.message);
+        console.error('❌ Camera error:', error);
+        showError("خطا در باز کردن دوربین. لطفاً دسترسی به دوربین را مجاز کنید.");
       }
     }
 
@@ -317,19 +349,17 @@
       context.drawImage(video, 0, 0);
       
       photoData = canvas.toDataURL('image/jpeg', 0.8);
+      console.log('📸 Photo taken, size:', photoData.length);
       
-      // نمایش پیش‌نمایش
       const preview = document.getElementById('preview');
       preview.src = photoData;
       preview.style.display = 'block';
       video.style.display = 'none';
       
-      // بستن دوربین
       if (stream) {
         stream.getTracks().forEach(track => track.stop());
       }
       
-      // تغییر دکمه‌ها
       document.getElementById('takePictureBtn').style.display = 'none';
       document.getElementById('submitBtn').style.display = 'block';
       document.getElementById('submitBtn').disabled = false;
@@ -352,51 +382,58 @@
       document.getElementById('submitBtn').disabled = true;
       document.getElementById('submitBtn').innerHTML = '<div class="spinner"></div>';
       
+      const payload = {
+        user_id: userId,
+        user_name: userName,
+        latitude: latitude,
+        longitude: longitude,
+        photo: photoData,
+        timestamp: new Date().toISOString()
+      };
+      
+      console.log('📤 Sending data:', {
+        user_id: userId,
+        latitude: latitude,
+        longitude: longitude,
+        photo_size: photoData.length
+      });
+      
       try {
         const response = await fetch('https://script.google.com/macros/s/AKfycbw_-Sba6Twn3blLe45B2FPXT4B9TOEmUkXc6-Q6KMnkYyhPfpSVDmReAfvH9dgSq43Z/exec', {
           method: 'POST',
+          mode: 'no-cors', // ⭐ مهم برای Google Apps Script
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({
-            user_id: userId,
-            user_name: userName,
-            latitude: latitude,
-            longitude: longitude,
-            photo: photoData,
-            timestamp: new Date().toISOString()
-          })
+          body: JSON.stringify(payload)
         });
 
-        if (response.ok) {
-          // نمایش موفقیت
-          document.querySelector('.status').style.display = 'none';
-          document.querySelector('.location-info').style.display = 'none';
-          document.getElementById('cameraContainer').style.display = 'none';
-          document.getElementById('submitBtn').style.display = 'none';
-          document.getElementById('retakeBtn').style.display = 'none';
-          document.getElementById('success').classList.add('show');
-          
-          // بستن بعد از 2 ثانیه
-          setTimeout(() => {
-            tg.close();
-          }, 2000);
-        } else {
-          alert('خطا در ثبت حضور. لطفاً دوباره تلاش کنید.')
-          document.getElementById('submitBtn').disabled = false;
-          document.getElementById('submitBtn').innerHTML = '✅ ثبت حضور';
-        }
+        console.log('✅ Response received');
+        
+        // با no-cors نمی‌تونیم response بخونیم، پس فرض می‌کنیم موفق بوده
+        document.querySelector('.status').style.display = 'none';
+        document.querySelector('.location-info').style.display = 'none';
+        document.getElementById('cameraContainer').style.display = 'none';
+        document.getElementById('submitBtn').style.display = 'none';
+        document.getElementById('retakeBtn').style.display = 'none';
+        document.getElementById('success').classList.add('show');
+        
+        // بستن بعد از 3 ثانیه
+        setTimeout(() => {
+          window.close();
+        }, 3000);
+        
       } catch (error) {
-        alert('خطا: ' + error.message);
+        console.error('❌ Submit error:', error);
+        showError('خطا در ارسال: ' + error.message);
         document.getElementById('submitBtn').disabled = false;
         document.getElementById('submitBtn').innerHTML = '✅ ثبت حضور';
       }
     }
 
     // شروع
+    console.log('🚀 Starting Mini App...');
     getLocation();
   </script>
 </body>
-
 </html>
-
