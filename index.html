@@ -316,7 +316,7 @@
             }
         }
 
-        // ========== گرفتن عکس و ارسال ==========
+        // ========== گرفتن عکس و ارسال (بخش اصلاح شده) ==========
         async function captureAndSend() {
             if (!latitude || !longitude) {
                 showStatus('❌ ابتدا موقعیت مکانی را دریافت کنید', 'error');
@@ -340,11 +340,12 @@
 
                 showStatus('در حال ارسال به سرور...', 'loading');
 
-                // ارسال به Google Apps Script
+                // ارسال به Google Apps Script با تنظیمات اصلاح شده
                 const response = await fetch(SCRIPT_URL, {
                     method: 'POST',
+                    redirect: 'follow', // ✅ بسیار مهم برای گوگل
                     headers: {
-                        'Content-Type': 'application/json',
+                        'Content-Type': 'text/plain;charset=utf-8', // ✅ اصلاح شده برای جلوگیری از CORS
                     },
                     body: JSON.stringify({
                         user_id: getUserId(),
@@ -404,18 +405,13 @@
 
         // ========== دریافت User ID (از URL یا Cookie) ==========
         function getUserId() {
-            // اگر از Telegram Mini App استفاده می‌کنید:
-            // return window.Telegram?.WebApp?.initDataUnsafe?.user?.id;
-            
-            // یا از URL:
+            // دریافت از URL
             const params = new URLSearchParams(window.location.search);
             return params.get('user_id') || 'unknown';
         }
 
         // ========== دریافت User Name ==========
         function getUserName() {
-            // return window.Telegram?.WebApp?.initDataUnsafe?.user?.first_name;
-            
             const params = new URLSearchParams(window.location.search);
             return params.get('user_name') || 'کاربر';
         }
@@ -435,5 +431,3 @@
     </script>
 </body>
 </html>
-
-
