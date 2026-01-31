@@ -146,22 +146,6 @@
             display: none !important;
         }
 
-        .loading-spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin-left: 10px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
         .location-info {
             background: #f9fafb;
             padding: 10px;
@@ -213,6 +197,7 @@
 
     <script>
         // ========== تنظیمات اولیه ==========
+        // ⚠️ مطمئن شوید این آدرس با آخرین نسخه Deploy شده شما یکی است
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxeYzRx6Hn8CCYFarg2WQZdXJ5vzXFYK-wl-Q1AO-0rDa87bAAKXY5ddzAjv0EQegxf/exec';  
         
         let stream = null;
@@ -228,7 +213,7 @@
         const locationText = document.getElementById('location-text');
         const locationInfo = document.getElementById('location-info');
 
-        // ========== دریافت موقعیت مکانی ==========
+        // ========== 1. دریافت موقعیت مکانی ==========
         function getLocation() {
             showStatus('در حال دریافت موقعیت مکانی...', 'loading');
             
@@ -252,45 +237,26 @@
                 },
                 (error) => {
                     let errorMsg = 'خطا در دریافت موقعیت';
-                    
                     switch(error.code) {
-                        case error.PERMISSION_DENIED:
-                            errorMsg = '❌ شما اجازه دسترسی به موقعیت را ندادید';
-                            break;
-                        case error.POSITION_UNAVAILABLE:
-                            errorMsg = '❌ موقعیت در دسترس نیست';
-                            break;
-                        case error.TIMEOUT:
-                            errorMsg = '❌ زمان دریافت موقعیت تمام شد';
-                            break;
+                        case error.PERMISSION_DENIED: errorMsg = '❌ دسترسی به موقعیت داده نشد'; break;
+                        case error.POSITION_UNAVAILABLE: errorMsg = '❌ موقعیت در دسترس نیست'; break;
+                        case error.TIMEOUT: errorMsg = '❌ زمان دریافت موقعیت تمام شد'; break;
                     }
-                    
                     locationText.textContent = errorMsg;
                     showStatus(errorMsg, 'error');
                 },
-                {
-                    enableHighAccuracy: true,
-                    timeout: 10000,
-                    maximumAge: 0
-                }
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
             );
         }
 
-        // ========== فعال کردن دوربین ==========
+        // ========== 2. فعال کردن دوربین ==========
         async function startCamera() {
             try {
                 showStatus('در حال فعال‌سازی دوربین...', 'loading');
-                
-                // درخواست دسترسی با کیفیت بالا
                 const constraints = {
-                    video: {
-                        facingMode: 'user', // دوربین جلو
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 }
-                    },
+                    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
                     audio: false
                 };
-
                 stream = await navigator.mediaDevices.getUserMedia(constraints);
                 video.srcObject = stream;
 
@@ -300,56 +266,41 @@
                 
                 showStatus('✅ دوربین فعال شد - آماده گرفتن عکس', 'success');
             } catch (err) {
-                console.error('خطا در فعال‌سازی دوربین:', err);
-                
-                let errorMsg = 'خطا در فعال‌سازی دوربین';
-                
-                if (err.name === 'NotAllowedError') {
-                    errorMsg = '❌ شما اجازه دسترسی به دوربین را ندادید';
-                } else if (err.name === 'NotFoundError') {
-                    errorMsg = '❌ دوربینی پیدا نشد';
-                } else if (err.name === 'NotReadableError') {
-                    errorMsg = '❌ دوربین در حال استفاده توسط برنامه دیگری است';
-                }
-                
-                showStatus(errorMsg, 'error');
+                console.error('Camera Error:', err);
+                showStatus('❌ خطا در دسترسی به دوربین', 'error');
             }
         }
 
-        // ========== گرفتن عکس و ارسال (بخش اصلاح شده) ==========
+        // ========== 3. گرفتن عکس و ارسال (اصلاح شده) ==========
         async function captureAndSend() {
             if (!latitude || !longitude) {
                 showStatus('❌ ابتدا موقعیت مکانی را دریافت کنید', 'error');
                 return;
             }
 
+            // بررسی مجدد ID قبل از ارسال
+            const currentUserId = getUserId();
+            console.log("Sending data for User ID:", currentUserId);
+
             try {
-                showStatus('در حال گرفتن عکس...', 'loading');
+                showStatus('در حال ارسال عکس...', 'loading');
                 captureBtn.disabled = true;
 
-                // تنظیم اندازه Canvas بر اساس Video
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
-
-                // کشیدن تصویر روی Canvas
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0);
+                const photoBase64 = canvas.toDataURL('image/jpeg', 0.8); // کیفیت 0.8
 
-                // تبدیل به Base64
-                const photoBase64 = canvas.toDataURL('image/jpeg', 0.9);
-
-                showStatus('در حال ارسال به سرور...', 'loading');
-
-                // ارسال به Google Apps Script با تنظیمات اصلاح شده
+                // ✅ تنظیمات دقیق Fetch برای جلوگیری از CORS و ارسال متن ساده
                 const response = await fetch(SCRIPT_URL, {
                     method: 'POST',
-                    redirect: 'follow', // ✅ بسیار مهم برای گوگل
+                    redirect: 'follow', // ✅ حیاتی برای اسکریپت گوگل
                     headers: {
-                        'Content-Type': 'text/plain;charset=utf-8', // ✅ اصلاح شده برای جلوگیری از CORS
+                        'Content-Type': 'text/plain;charset=utf-8', // ✅ حیاتی: ارسال به عنوان متن ساده
                     },
                     body: JSON.stringify({
-                        user_id: getUserId(),
-                        user_name: getUserName(),
+                        user_id: currentUserId, // آیدی دریافت شده از URL
                         photo: photoBase64,
                         latitude: latitude,
                         longitude: longitude,
@@ -360,33 +311,23 @@
                 const result = await response.json();
 
                 if (result.success) {
-                    showStatus('✅ حضور شما با موفقیت ثبت شد!', 'success');
-                    
-                    locationInfo.innerHTML = `
-                        <strong>✅ اطلاعات ثبت شده:</strong><br>
-                        📍 موقعیت: ${latitude.toFixed(6)}, ${longitude.toFixed(6)}<br>
-                        ⏰ زمان: ${new Date().toLocaleString('fa-IR')}
-                    `;
+                    showStatus('✅ ' + result.message, 'success');
+                    locationInfo.innerHTML = `✅ ثبت موفق: ${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
                     locationInfo.classList.remove('hidden');
-
-                    // بستن دوربین
                     stopCamera();
-                    
-                    // بستن صفحه بعد از 3 ثانیه
-                    setTimeout(() => {
-                        window.close();
-                    }, 3000);
+                    setTimeout(() => window.close(), 3000); // بستن خودکار بعد از 3 ثانیه
                 } else {
-                    throw new Error(result.error || 'خطای ناشناخته');
+                    throw new Error(result.error || 'خطای سرور');
                 }
+
             } catch (error) {
-                console.error('خطا در ارسال:', error);
+                console.error('Upload Error:', error);
                 showStatus(`❌ خطا: ${error.message}`, 'error');
                 captureBtn.disabled = false;
             }
         }
 
-        // ========== بستن دوربین ==========
+        // ========== توابع کمکی ==========
         function stopCamera() {
             if (stream) {
                 stream.getTracks().forEach(track => track.stop());
@@ -396,37 +337,30 @@
             }
         }
 
-        // ========== نمایش وضعیت ==========
         function showStatus(message, type) {
             statusDiv.textContent = message;
             statusDiv.className = `status ${type}`;
             statusDiv.classList.remove('hidden');
         }
 
-        // ========== دریافت User ID (از URL یا Cookie) ==========
+        // ✅ تابع حیاتی برای خواندن ID از لینک
         function getUserId() {
-            // دریافت از URL
             const params = new URLSearchParams(window.location.search);
-            return params.get('user_id') || 'unknown';
+            const id = params.get('user_id');
+            // برای دیباگ در کنسول مرورگر
+            if(!id) console.warn("User ID not found in URL!"); 
+            return id || 'unknown';
         }
 
-        // ========== دریافت User Name ==========
-        function getUserName() {
-            const params = new URLSearchParams(window.location.search);
-            return params.get('user_name') || 'کاربر';
-        }
-
-        // ========== Event Listeners ==========
+        // ========== رویدادها ==========
         startCameraBtn.addEventListener('click', startCamera);
         captureBtn.addEventListener('click', captureAndSend);
-
-        // بستن دوربین وقتی صفحه بسته می‌شود
         window.addEventListener('beforeunload', stopCamera);
-
-        // شروع با دریافت موقعیت
+        
+        // شروع برنامه
         window.addEventListener('load', () => {
             getLocation();
-            startCameraBtn.disabled = true; // تا موقعیت دریافت نشه غیرفعال
+            startCameraBtn.disabled = true;
         });
     </script>
 </body>
