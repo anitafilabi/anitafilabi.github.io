@@ -13,7 +13,7 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #f3f4f6; /* رنگ پس‌زمینه خنثی */
+            background: #f3f4f6;
             min-height: 100vh;
             display: flex;
             justify-content: center;
@@ -21,7 +21,6 @@
             padding: 20px;
         }
 
-        /* استایل‌های داینامیک برای پس‌زمینه بر اساس نوع تردد */
         body.mode-start { background: linear-gradient(135deg, #d1fae5 0%, #10b981 100%); }
         body.mode-end { background: linear-gradient(135deg, #fee2e2 0%, #ef4444 100%); }
         body.mode-default { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
@@ -100,10 +99,9 @@
             transform: none !important;
         }
 
-        /* کلاس‌های دکمه که با JS تغییر می‌کنند */
         .btn-default { background: #667eea; }
-        .btn-start { background: #10b981; } /* سبز */
-        .btn-end { background: #ef4444; }   /* قرمز */
+        .btn-start { background: #10b981; }
+        .btn-end { background: #ef4444; }
 
         .status {
             text-align: center;
@@ -128,9 +126,21 @@
             color: #666;
             text-align: center;
         }
+
+        /* دکمه تلاش مجدد */
+        .retry-btn {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-top: 5px;
+            font-size: 12px;
+        }
     </style>
 </head>
-<body class="mode-default"> <!-- کلاس پیش فرض -->
+<body class="mode-default">
     <div class="container">
         <h1 id="page-title">📸 ثبت حضور و غیاب</h1>
         <p class="subtitle" id="page-subtitle">در حال بارگذاری...</p>
@@ -147,8 +157,8 @@
 
         <canvas id="canvas"></canvas>
 
-        <button id="start-camera" class="btn btn-default">
-            📷 فعال‌سازی دوربین
+        <button id="start-camera" class="btn btn-default" disabled>
+            ⏳ منتظر GPS...
         </button>
 
         <button id="capture" class="btn btn-default hidden">
@@ -160,20 +170,16 @@
 
     <script>
         // ========== تنظیمات ==========
-        // ⚠️ آدرس اسکریپت جدید خود را اینجا قرار دهید:
         const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbxeYzRx6Hn8CCYFarg2WQZdXJ5vzXFYK-wl-Q1AO-0rDa87bAAKXY5ddzAjv0EQegxf/exec';
         
-        // متغیرهای سراسری
         let stream = null;
         let latitude = null;
         let longitude = null;
         
-        // دریافت پارامترهای URL
         const urlParams = new URLSearchParams(window.location.search);
         const userId = urlParams.get('user_id');
-        const attendanceType = urlParams.get('type'); // 'start' یا 'end'
+        const attendanceType = urlParams.get('type');
 
-        // المان‌های DOM
         const video = document.getElementById('video');
         const canvas = document.getElementById('canvas');
         const startCameraBtn = document.getElementById('start-camera');
@@ -186,11 +192,10 @@
         const pageSubtitle = document.getElementById('page-subtitle');
         const bodyTag = document.body;
 
-        // ========== 0. تنظیم ظاهر بر اساس نوع درخواست ==========
+        // ========== 0. تنظیم ظاهر ==========
         function initUI() {
             if (!userId) {
                 showStatus('❌ شناسه کاربر یافت نشد. لطفاً از طریق ربات وارد شوید.', 'error');
-                startCameraBtn.disabled = true;
                 return;
             }
 
@@ -198,62 +203,94 @@
 
             if (attendanceType === 'start') {
                 pageTitle.innerText = "✅ ثبت شروع شیفت (ورود)";
-                bodyTag.className = "mode-start"; // سبز
-                
+                bodyTag.className = "mode-start";
                 startCameraBtn.className = "btn btn-start";
                 captureBtn.className = "btn btn-start";
                 captureBtn.innerText = "✅ ثبت ورود";
-                
             } else if (attendanceType === 'end') {
                 pageTitle.innerText = "🏁 ثبت پایان شیفت (خروج)";
-                bodyTag.className = "mode-end"; // قرمز
-                
+                bodyTag.className = "mode-end";
                 startCameraBtn.className = "btn btn-end";
                 captureBtn.className = "btn btn-end";
                 captureBtn.innerText = "🏁 ثبت خروج";
             } else {
-                // حالت پیش‌فرض
                 pageTitle.innerText = "📸 ثبت حضور و غیاب";
                 bodyTag.className = "mode-default";
             }
         }
 
-        // ========== 1. دریافت موقعیت مکانی ==========
-        function getLocation() {
-            // showStatus('در حال دریافت موقعیت مکانی...', 'loading'); // اختیاری
-            
+        // ========== 1. سیستم دریافت موقعیت مکانی هوشمند ==========
+        function requestLocation() {
+            locationText.innerHTML = "⏳ در حال دریافت موقعیت (دقیق)...";
+            startCameraBtn.disabled = true;
+            startCameraBtn.innerText = "⏳ منتظر GPS...";
+
             if (!navigator.geolocation) {
-                locationText.innerText = "❌ مرورگر پشتیبانی نمی‌کند";
-                showStatus('مرورگر شما از GPS پشتیبانی نمی‌کند', 'error');
+                handleLocationError({code: 'NOT_SUPPORTED'});
                 return;
             }
 
-            navigator.geolocation.getCurrentPosition(
-                (position) => {
-                    latitude = position.coords.latitude;
-                    longitude = position.coords.longitude;
-                    
-                    locationText.innerHTML = `<span style="color:green">✅ متصل (Lat: ${latitude.toFixed(4)})</span>`;
-                    startCameraBtn.disabled = false;
-                },
+            // تلاش اول accuracy...", error);
+                    retryLowAccuracy(); // سوئیچ به روش دوم
+                }, 
+                {                onLocationSuccess, 
                 (error) => {
-                    let errorMsg = 'خطا در دریافت موقعیت';
-                    switch(error.code) {
-                        case error.PERMISSION_DENIED: errorMsg = '❌ دسترسی GPS داده نشد'; break;
-                        case error.POSITION_UNAVAILABLE: errorMsg = '❌ موقعیت در دسترس نیست'; break;
-                        case error.TIMEOUT: errorMsg = '❌ زمان پاسخ‌دهی GPS تمام شد'; break;
-                    }
-                    locationText.textContent = errorMsg;
-                    showStatus(errorMsg + '. لطفاً GPS را روشن کنید.', 'error');
-                },
-                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+                    console.warn("High accuracy failed, trying low accuracy...", error);
+                    retryLowAccuracy(); // سوئیچ به روش دوم
+                }, 
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
             );
+        }
+
+        function retryLowAccuracy() {
+            locationText.innerHTML = "⚠️ سیگنال GPS ضعیف. تلاش با شبکه...";
+            
+            // تلاش دوم: دقت پایین (Wifi/Cell) - تایم‌آوت 15 ثانیه
+            navigator.geolocation.getCurrentPosition(
+                onLocationSuccess,
+                handleLocationError,
+                { enableHighAccuracy: false, timeout: 15000, maximumAge: 30000 }
+            );
+        }
+
+        function onLocationSuccess(position) {
+            latitude = position.coords.latitude;
+            longitude = position.coords.longitude;
+            
+            const acc = Math.round(position.coords.accuracy);
+            locationText.innerHTML = `<span style="color:green">✅ متصل (دقت: ${acc} متر)</span>`;
+            
+            startCameraBtn.disabled = false;
+            startCameraBtn.innerText = "📷 فعال‌سازی دوربین";
+        }
+
+        function handleLocationError(error) {
+            let errorMsg = 'خطا در دریافت موقعیت';
+            let showRetry = true;
+
+            if (error.code === 'NOT_SUPPORTED') {
+                errorMsg = '❌ مرورگر پشتیبانی نمی‌کند';
+                showRetry = false;
+            } else if (error.code === error.PERMISSION_DENIED) {
+                errorMsg = '⛔ دسترسی GPS رد شد. لطفاً از تنظیمات مرورگر اجازه دهید.';
+                showRetry = false; // اگر کاربر رد کرده، تلاش مجدد فایده ندارد
+            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                errorMsg = '📡 موقعیت یافت نشد (GPS روشن است؟)';
+            } else if (error.code === error.TIMEOUT) {
+                errorMsg = '⏰ زمان دریافت تمام شد. لطفاً فضای باز بروید.';
+            }
+
+            let html = `<span style="color:red">${errorMsg}</span>`;
+            if (showRetry) {
+                html += `<br><button onclick="requestLocation()" class="retry-btn">🔄 تلاش مجدد</button>`;
+            }
+            locationText.innerHTML = html;
         }
 
         // ========== 2. فعال کردن دوربین ==========
         async function startCamera() {
             if (!latitude) {
-                showStatus('⏳ لطفاً صبر کنید تا موقعیت مکانی دریافت شود...', 'loading');
+                requestLocation(); // اگر موقعیت نبود، دوباره تلاش کن
                 return;
             }
 
@@ -273,14 +310,15 @@
                 showStatus('✅ آماده ثبت عکس', 'success');
             } catch (err) {
                 console.error('Camera Error:', err);
-                showStatus('❌ عدم دسترسی به دوربین. لطفاً دسترسی‌ها را بررسی کنید.', 'error');
+                showStatus('❌ عدم دسترسی به دوربین.', 'error');
             }
         }
 
-        // ========== 3. گرفتن عکس و ارسال (مهم) ==========
+        // ========== 3. گرفتن عکس و ارسال ==========
         async function captureAndSend() {
             if (!latitude || !longitude) {
-                showStatus('❌ موقعیت مکانی هنوز دریافت نشده است.', 'error');
+                showStatus('❌ موقعیت مکانی نامعتبر است.', 'error');
+                requestLocation();
                 return;
             }
 
@@ -294,25 +332,21 @@
                 const ctx = canvas.getContext('2d');
                 ctx.drawImage(video, 0, 0);
                 
-                // فشرده‌سازی عکس برای ارسال سریع‌تر
                 const photoBase64 = canvas.toDataURL('image/jpeg', 0.7); 
 
                 const payload = {
                     user_id: userId,
-                    attendance_type: attendanceType || 'unknown', // ✅ ارسال نوع تردد
+                    attendance_type: attendanceType || 'unknown',
                     photo: photoBase64,
                     latitude: latitude,
                     longitude: longitude,
                     timestamp: new Date().toISOString()
                 };
 
-                // ✅ ارسال به GAS با تنظیمات CORS صحیح
                 const response = await fetch(SCRIPT_URL, {
                     method: 'POST',
                     redirect: 'follow',
-                    headers: {
-                        'Content-Type': 'text/plain;charset=utf-8', 
-                    },
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
                     body: JSON.stringify(payload)
                 });
 
@@ -326,13 +360,11 @@
                     stopCamera();
                     captureBtn.classList.add('hidden');
                     
-                    // پیام نهایی
                     setTimeout(() => {
                         document.body.innerHTML = `
                             <div style="text-align:center; padding:50px;">
                                 <h1 style="color:green">✅ ثبت موفق</h1>
-                                <p>اطلاعات شما با موفقیت در سیستم ثبت شد.</p>
-                                <p>می‌توانید این صفحه را ببندید.</p>
+                                <p>اطلاعات شما با موفقیت ثبت شد.</p>
                                 <button onclick="window.close()" style="margin-top:20px; padding:10px 20px;">بستن صفحه</button>
                             </div>
                         `;
@@ -347,7 +379,6 @@
                 showStatus(`❌ خطا در ارسال: ${error.message}`, 'error');
                 captureBtn.disabled = false;
                 
-                // بازگرداندن متن دکمه
                 if (attendanceType === 'start') captureBtn.innerText = "✅ ثبت ورود";
                 else if (attendanceType === 'end') captureBtn.innerText = "🏁 ثبت خروج";
                 else captureBtn.innerText = "📸 ثبت مجدد";
@@ -361,25 +392,4 @@
                 videoContainer.classList.add('hidden');
             }
         }
-
-        function showStatus(message, type) {
-            statusDiv.textContent = message;
-            statusDiv.className = `status ${type}`;
-            statusDiv.classList.remove('hidden');
-        }
-
-        // رویدادها
-        startCameraBtn.addEventListener('click', startCamera);
-        captureBtn.addEventListener('click', captureAndSend);
-        
-        // راه‌اندازی اولیه
-        window.addEventListener('load', () => {
-            initUI(); 
-            getLocation();
-        });
-    </script>
-</body>
-</html>
-
-
 
